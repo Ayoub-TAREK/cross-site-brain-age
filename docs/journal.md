@@ -179,6 +179,18 @@ Out-of-site signed error by age group (bias in years):
 - In-site MAE is similar to v1 (6.8-7.1 vs 5.8-7.9).
 - Caveat: t1-linear combines N4 and affine registration; which of the two removes the Guys / HH shift is not known (an ablation could separate them). Single seed per run.
 
+**Note (2026-11-02): the caps_t1linear images are non-linearly registered.** With `--use-antspy`, Clinica 0.12 calls `ants.registration(..., type_of_transformation="antsRegistrationSyN[a]")`; ANTsPy's argument is `type_of_transform`, so the keyword is swallowed by `**kwargs` and the default `"SyN"` (affine + deformable SyN) is used, and Clinica saves `warpedmovout` (the SyN-warped image). Consistent with the `Warp` / `InverseWarp` files left in `/tmp` during the run. The v2 results are therefore for N4 + affine + SyN registration + crop, not a linear registration.
+
+## Conform baseline (2026-11-02, to run)
+
+`scripts/conform_preprocess.py`, `--data conform`, notebook section 17. Standard replacement for the v1 home-made preprocessing.
+
+- **What it does**: FreeSurfer "conform", as `mri_convert --conform`: reorientation to LIA, resampling to 1 mm isotropic voxels in a 256³ volume centred on the centre of the input volume (trilinear), intensities rescaled to 0-255 uint8 (lower limit = minimum, upper limit = 99.9th percentile of non-zero voxels, from a 1000-bin histogram). Python reimplementation of FastSurfer's `conform.py` (getscale / scalecrop / map_image); `--use-freesurfer` calls `mri_convert --conform` instead. Then linear resampling to 2 mm (129³, float32), as for t1-linear.
+- **What it does not do**: no registration, no bias field correction, no skull stripping.
+- **Checks** (3 subjects): LIA, 1 mm, 256³, uint8 0-255, 0.04-0.08 % of head voxels saturated at 255, volume centre preserved exactly. ~5-6 s per image (~13 min for 563 images on 12 local workers).
+- **Crop**: without registration, the t1-linear centre crop (96×112×96 at 2 mm) cuts more than 4 mm of the head in 246/563 subjects at the top (up to 24 mm) and 223 at the front. 112×128×112 (as v1) leaves more than 4 mm outside in 6/563 subjects only (at most 8 mm at the top, scalp). Training uses 112×128×112, then z-normalization. Check images: `docs/check_conform_*.png`.
+- Everything else unchanged: same splits, seed 42, default hyperparameters; evaluation of the final model (`--checkpoint final`).
+
 ## v3a: scanner-contrast augmentation
 
 - Same as v1, plus `--augment`: during training only, `RandomScannerContrast` rescales each image to [0, 1], applies a random gamma (log-uniform, 0.70-1.42) and, half of the time, a smooth bias field (coefficients 0.3), then maps the image back to its original intensity range. Applied with probability 0.8. Validation and test images are never augmented (ClinicaDL eval mode, checked).

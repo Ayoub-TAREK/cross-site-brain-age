@@ -8,10 +8,11 @@ Experiment:
 
 Run:  python scripts/train_ixi_site_shift.py --test-site IOP
       python scripts/train_ixi_site_shift.py --check   (checks the preprocessing on one image per hospital)
-          python scripts/train_ixi_site_shift.py --test-site IOP --data t1linear   (Clinica t1-linear images)
+      python scripts/train_ixi_site_shift.py --test-site IOP --data t1linear   (Clinica t1-linear images)
 
 --data bids2mm  (default) needs scripts/cache_preprocessed.py output in data/IXI/bids_2mm.
 --data t1linear needs data/IXI/caps_t1linear_2mm (scripts/t1_linear_wsl.sh); results go to *_t1linear folders.
+--data conform  needs data/IXI/caps_conform_2mm (scripts/conform_preprocess.py); results go to *_conform folders.
 --scheduler plateau and --seed <n> add _plateau / _seed<n> to the run folder.
 """
 
@@ -41,8 +42,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data" / "IXI"
 SITES = ["Guys", "HH", "IOP"]
 
-# Two preprocessings of the same 563 images: (folder, files to read, transforms applied at load time).
-# Both folders contain participants_sessions_age.tsv.
+# Preprocessings of the same 563 images: (folder, files to read, transforms applied at load time).
+# Every folder contains participants_sessions_age.tsv.
 INPUTS = {
     # ToCanonical, Resample 2 mm, ZNormalization, CropOrPad 112x128x112, already applied once and for all
     # by scripts/cache_preprocessed.py
@@ -54,6 +55,14 @@ INPUTS = {
         BidsFileType(data_type="t1_linear", suffix="T1w",
                      with_entities={"space": "MNI152NLin2009cSym", "desc": "Crop", "res": "2x2x2"}),
         [tio.CropOrPad((96, 112, 96)), tio.ZNormalization()],
+    ),
+    # FreeSurfer conform (LIA, 1 mm, 256^3, intensities 0-255), then 2 mm (129^3) by
+    # scripts/conform_preprocess.py; no registration, so the t1-linear crop (96x112x96) cuts the top of the
+    # head in 246/563 subjects: centre crop 112x128x112 (as bids2mm), then z-normalized
+    "conform": (
+        DATA_DIR / "caps_conform_2mm",
+        BidsFileType(data_type="conform", suffix="T1w", with_entities={"desc": "conform", "res": "2x2x2"}),
+        [tio.CropOrPad((112, 128, 112)), tio.ZNormalization()],
     ),
 }
 

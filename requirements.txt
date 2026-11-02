@@ -1,4 +1,4 @@
-# Versions installées dans le .venv local (Windows, CPU)
+# Versions installed in the local .venv (Windows, CPU)
 clinicadl==2.0.0
 torch==2.6.0
 monai==1.5.0
@@ -6,3 +6,6 @@ torchio==0.20.23
 pandas==2.3.3
 xlrd==2.0.2
 matplotlib==3.11.2
+nibabel==5.4.2
+scipy==1.17.1
+tqdm==4.70.1
