@@ -19,12 +19,12 @@ def clean(ax):
     ax.tick_params(length=0)
 
 
-# 1. out-of-site MAE per held-out hospital: own preprocessing vs Clinica t1-linear
+# 1. out-of-site MAE per held-out hospital: FreeSurfer conform vs Clinica t1-linear (best validation epoch)
 sites = ["IOP", "HH", "Guys"]
-v1, v2 = [10.8, 25.2, 17.1], [11.2, 8.6, 8.9]
+base, v2 = [12.8, 26.8, 18.7], [11.2, 8.6, 8.9]
 fig, ax = plt.subplots(figsize=(8, 4.6))
 w, gap = 0.36, 0.02
-for i, (a, b) in enumerate(zip(v1, v2)):
+for i, (a, b) in enumerate(zip(base, v2)):
     for x, val, col in [(i - w / 2 - gap, a, S1), (i + w / 2 + gap, b, S2)]:
         ax.bar(x, val, width=w, color=col, edgecolor=SURFACE, linewidth=2)
         ax.text(x, val + 0.5, f"{val:.1f}", ha="center", va="bottom", fontsize=10.5, color=INK)
@@ -33,7 +33,7 @@ ax.text(2.62, 15, "always predicting\nthe mean age", va="center", ha="right", fo
 ax.set_xticks(range(3), [f"{s}\nheld out" for s in sites])
 ax.set_ylabel("Out-of-site MAE (years)")
 ax.set_ylim(0, 34); ax.set_yticks(range(0, 30, 5))
-ax.bar(0, 0, color=S1, label="v1: own preprocessing (2 mm, no registration)")
+ax.bar(0, 0, color=S1, label="Baseline: FreeSurfer conform (no registration)")
 ax.bar(0, 0, color=S2, label="v2: Clinica t1-linear (bias correction + registration)")
 ax.legend(frameon=False, loc="upper right", fontsize=9.5, labelcolor=INK)
 ax.set_title("Error on the unseen hospital, before and after Clinica t1-linear", loc="left", fontsize=12.5, pad=12)

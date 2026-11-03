@@ -154,6 +154,8 @@ def main():
     args = parser.parse_args()
     if args.use_freesurfer and shutil.which("mri_convert") is None:
         parser.error("--use-freesurfer: mri_convert not found in PATH")
+    if not (SRC_DIR / "participants_sessions_age.tsv").exists():
+        parser.error(f"{SRC_DIR} not found: run scripts/ixi_to_bids.py first")
 
     write_metadata(args.use_freesurfer)
     images = sorted(SRC_DIR.glob("sub-*/ses-*/anat/*_T1w.nii.gz"))
