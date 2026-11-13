@@ -122,6 +122,8 @@ def main():
     parser.add_argument("--threads", type=int, default=os.cpu_count())
     parser.add_argument("--timeout", type=int, default=30, help="minutes per subject")
     parser.add_argument("--max-subjects", type=int, default=None, help="stop after N subjects (timing test)")
+    parser.add_argument("--max-hours", type=float, default=None,
+                        help="stop before starting a subject that would end after this time (e.g. Kaggle's 12 h limit)")
     parser.add_argument("--parts", type=int, default=1, help="number of sessions running at the same time")
     parser.add_argument("--part", type=int, default=1, help="part processed by this session (1 to --parts)")
     args = parser.parse_args()
@@ -147,7 +149,11 @@ def main():
     log_file = args.out_dir / ("fastsurfer_log.tsv" if args.parts == 1 else f"fastsurfer_log_part{args.part}.tsv")
 
     times, failed = [], []
+    t0 = time.time()
     for i, src in enumerate(todo, 1):
+        if args.max_hours and times and time.time() - t0 + 1.5 * max(times) > args.max_hours * 3600:
+            print(f"Time budget of {args.max_hours} h reached: stopping before {src.parts[-4]}", flush=True)
+            break
         sub, ses = src.parts[-4], src.parts[-3]
         sid = f"{sub}_{ses}"
         shutil.rmtree(args.work_dir / sid, ignore_errors=True)  # leftover of an interrupted run
