@@ -15,13 +15,14 @@ per subject) is deleted after each subject; only the 2 mm images, the volume sta
 Input : data/IXI/bids/sub-*/ses-*/anat/*_T1w.nii.gz
 Output: <out-dir>/subjects/sub-*/ses-*/fastsurfer/sub-*_ses-*_desc-{nu,brain}_res-2x2x2_T1w.nii.gz
         <out-dir>/stats/sub-*_ses-*_aseg+DKT.stats       FastSurfer volumes (kept, a few kB)
-        <out-dir>/fastsurfer_log[_reverse].tsv            time, status and brain mask volume per subject
+        <out-dir>/fastsurfer_log[_part<k>].tsv            time, status and brain mask volume per subject
         + dataset_description.json and participants_sessions_age.tsv
 
-Two sessions at once (e.g. two Colab runtimes on the same Drive folder): run one normally and one with
---reverse; they start from opposite ends and skip subjects the other one has finished.
+Several sessions at once (e.g. 4 Colab runtimes on the same Drive folder): --parts 4 --part 1 ... --part 4.
+The subject list is cut into fixed contiguous parts, so two sessions never process the same subject.
 
-Run:  python scripts/fastsurfer_preprocess.py --fastsurfer-home /content/FastSurfer [--out-dir DIR] [--max-subjects N] [--reverse]
+Run:  python scripts/fastsurfer_preprocess.py --fastsurfer-home /content/FastSurfer [--out-dir DIR] [--max-subjects N]
+                                              [--parts 4 --part 1]
 """
 
 import argparse
@@ -121,32 +122,34 @@ def main():
     parser.add_argument("--threads", type=int, default=os.cpu_count())
     parser.add_argument("--timeout", type=int, default=30, help="minutes per subject")
     parser.add_argument("--max-subjects", type=int, default=None, help="stop after N subjects (timing test)")
-    parser.add_argument("--reverse", action="store_true",
-                        help="start from the last subject: a second session can run at the same time")
+    parser.add_argument("--parts", type=int, default=1, help="number of sessions running at the same time")
+    parser.add_argument("--part", type=int, default=1, help="part processed by this session (1 to --parts)")
     args = parser.parse_args()
     if not (args.fastsurfer_home / "run_fastsurfer.sh").exists():
         parser.error(f"run_fastsurfer.sh not found in {args.fastsurfer_home}")
     if not (SRC_DIR / "participants_sessions_age.tsv").exists():
         parser.error(f"{SRC_DIR} not found: run scripts/ixi_to_bids.py first")
+    if not 1 <= args.part <= args.parts:
+        parser.error("--part must be between 1 and --parts")
 
     write_metadata(args.out_dir)
-    images = sorted(SRC_DIR.glob("sub-*/ses-*/anat/*_T1w.nii.gz"))
-    todo = [src for src in images
-            if not all(output_path(args.out_dir, src.parts[-4], src.parts[-3], d).exists() for d in VARIANTS)]
-    print(f"{len(images)} images, {len(images) - len(todo)} already done, {len(todo)} to process", flush=True)
-    todo = (todo[::-1] if args.reverse else todo)[:args.max_subjects]
-    # one log per session: two Colab sessions appending to the same Drive file could lose lines
-    log_file = args.out_dir / ("fastsurfer_log_reverse.tsv" if args.reverse else "fastsurfer_log.tsv")
-
     def is_done(src: Path) -> bool:
         return all(output_path(args.out_dir, src.parts[-4], src.parts[-3], d).exists() for d in VARIANTS)
+
+    images = sorted(SRC_DIR.glob("sub-*/ses-*/anat/*_T1w.nii.gz"))
+    n = len(images)
+    part = images[(args.part - 1) * n // args.parts: args.part * n // args.parts]  # same parts at every launch
+    todo = [src for src in part if not is_done(src)]
+    print(f"{n} images; part {args.part}/{args.parts}: {len(part)} images, {len(part) - len(todo)} already done, "
+          f"{len(todo)} to process", flush=True)
+    todo = todo[:args.max_subjects]
+    # one log per session: several Colab sessions appending to the same Drive file could lose lines
+    log_file = args.out_dir / ("fastsurfer_log.tsv" if args.parts == 1 else f"fastsurfer_log_part{args.part}.tsv")
 
     times, failed = [], []
     for i, src in enumerate(todo, 1):
         sub, ses = src.parts[-4], src.parts[-3]
         sid = f"{sub}_{ses}"
-        if is_done(src):  # done in the meantime by the other session
-            continue
         shutil.rmtree(args.work_dir / sid, ignore_errors=True)  # leftover of an interrupted run
         args.work_dir.mkdir(parents=True, exist_ok=True)
         start = time.time()
@@ -173,13 +176,12 @@ def main():
         (args.work_dir / f"{sid}.log").unlink(missing_ok=True)
 
         times.append(seconds)
-        remaining = sum(not is_done(s) for s in todo[i:])
-        left = remaining * np.mean(times) / 3600
+        left = (len(todo) - i) * np.mean(times) / 3600
         print(f"[{i}/{len(todo)}] {sid}: {row['status']} in {seconds / 60:.1f} min "
-              f"(mask {row['mask_ml']} ml) | {remaining} subjects left, ~{left:.1f} h for one session", flush=True)
+              f"(mask {row['mask_ml']} ml) | ~{left:.1f} h left for this part", flush=True)
 
-    n = len(list(args.out_dir.glob("subjects/*/*/fastsurfer/*_desc-brain_res-2x2x2_T1w.nii.gz")))
-    print(f"Done: {n} / {len(images)} subjects in {args.out_dir}")
+    done = len(list(args.out_dir.glob("subjects/*/*/fastsurfer/*_desc-brain_res-2x2x2_T1w.nii.gz")))
+    print(f"Part {args.part}/{args.parts} finished. All parts: {done} / {n} subjects in {args.out_dir}")
     if failed:
         print(f"Failed ({len(failed)}), logs in {args.out_dir / 'failed'}: {failed}")
 
