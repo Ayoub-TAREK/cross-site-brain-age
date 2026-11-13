@@ -15,10 +15,13 @@ per subject) is deleted after each subject; only the 2 mm images, the volume sta
 Input : data/IXI/bids/sub-*/ses-*/anat/*_T1w.nii.gz
 Output: <out-dir>/subjects/sub-*/ses-*/fastsurfer/sub-*_ses-*_desc-{nu,brain}_res-2x2x2_T1w.nii.gz
         <out-dir>/stats/sub-*_ses-*_aseg+DKT.stats       FastSurfer volumes (kept, a few kB)
-        <out-dir>/fastsurfer_log.tsv                      time, status and brain mask volume per subject
+        <out-dir>/fastsurfer_log[_reverse].tsv            time, status and brain mask volume per subject
         + dataset_description.json and participants_sessions_age.tsv
 
-Run:  python scripts/fastsurfer_preprocess.py --fastsurfer-home /content/FastSurfer [--out-dir DIR] [--max-subjects N]
+Two sessions at once (e.g. two Colab runtimes on the same Drive folder): run one normally and one with
+--reverse; they start from opposite ends and skip subjects the other one has finished.
+
+Run:  python scripts/fastsurfer_preprocess.py --fastsurfer-home /content/FastSurfer [--out-dir DIR] [--max-subjects N] [--reverse]
 """
 
 import argparse
@@ -86,8 +89,7 @@ def make_inputs(subject_dir: Path, out_dir: Path, sub: str, ses: str) -> float:
     return float(mask.sum()) / 1000.0  # 1 mm^3 voxels
 
 
-def append_log(out_dir: Path, row: dict) -> None:
-    log = out_dir / "fastsurfer_log.tsv"
+def append_log(log: Path, row: dict) -> None:
     pd.DataFrame([row], columns=LOG_COLUMNS).to_csv(log, sep="\t", index=False, mode="a", header=not log.exists())
 
 
@@ -119,6 +121,8 @@ def main():
     parser.add_argument("--threads", type=int, default=os.cpu_count())
     parser.add_argument("--timeout", type=int, default=30, help="minutes per subject")
     parser.add_argument("--max-subjects", type=int, default=None, help="stop after N subjects (timing test)")
+    parser.add_argument("--reverse", action="store_true",
+                        help="start from the last subject: a second session can run at the same time")
     args = parser.parse_args()
     if not (args.fastsurfer_home / "run_fastsurfer.sh").exists():
         parser.error(f"run_fastsurfer.sh not found in {args.fastsurfer_home}")
@@ -130,12 +134,19 @@ def main():
     todo = [src for src in images
             if not all(output_path(args.out_dir, src.parts[-4], src.parts[-3], d).exists() for d in VARIANTS)]
     print(f"{len(images)} images, {len(images) - len(todo)} already done, {len(todo)} to process", flush=True)
-    todo = todo[:args.max_subjects]
+    todo = (todo[::-1] if args.reverse else todo)[:args.max_subjects]
+    # one log per session: two Colab sessions appending to the same Drive file could lose lines
+    log_file = args.out_dir / ("fastsurfer_log_reverse.tsv" if args.reverse else "fastsurfer_log.tsv")
+
+    def is_done(src: Path) -> bool:
+        return all(output_path(args.out_dir, src.parts[-4], src.parts[-3], d).exists() for d in VARIANTS)
 
     times, failed = [], []
     for i, src in enumerate(todo, 1):
         sub, ses = src.parts[-4], src.parts[-3]
         sid = f"{sub}_{ses}"
+        if is_done(src):  # done in the meantime by the other session
+            continue
         shutil.rmtree(args.work_dir / sid, ignore_errors=True)  # leftover of an interrupted run
         args.work_dir.mkdir(parents=True, exist_ok=True)
         start = time.time()
@@ -157,14 +168,15 @@ def main():
             row = dict(status="failed", mask_ml=None, message=str(e)[:200])
             failed.append(sid)
         seconds = time.time() - start
-        append_log(args.out_dir, dict(participant_id=sub, session_id=ses, seconds=round(seconds), **row))
+        append_log(log_file, dict(participant_id=sub, session_id=ses, seconds=round(seconds), **row))
         shutil.rmtree(args.work_dir / sid, ignore_errors=True)
         (args.work_dir / f"{sid}.log").unlink(missing_ok=True)
 
         times.append(seconds)
-        left = (len(todo) - i) * np.mean(times) / 3600
+        remaining = sum(not is_done(s) for s in todo[i:])
+        left = remaining * np.mean(times) / 3600
         print(f"[{i}/{len(todo)}] {sid}: {row['status']} in {seconds / 60:.1f} min "
-              f"(mask {row['mask_ml']} ml) | ~{left:.1f} h left", flush=True)
+              f"(mask {row['mask_ml']} ml) | {remaining} subjects left, ~{left:.1f} h for one session", flush=True)
 
     n = len(list(args.out_dir.glob("subjects/*/*/fastsurfer/*_desc-brain_res-2x2x2_T1w.nii.gz")))
     print(f"Done: {n} / {len(images)} subjects in {args.out_dir}")
