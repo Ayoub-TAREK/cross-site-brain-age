@@ -13,6 +13,7 @@ Run:  python scripts/train_ixi_site_shift.py --test-site IOP
 --data bids2mm  (default) needs scripts/cache_preprocessed.py output in data/IXI/bids_2mm.
 --data t1linear needs data/IXI/caps_t1linear_2mm (scripts/t1_linear_wsl.sh); results go to *_t1linear folders.
 --data conform  needs data/IXI/caps_conform_2mm (scripts/conform_preprocess.py); results go to *_conform folders.
+--data fastsurfer_nu / fastsurfer_brain need data/IXI/caps_fastsurfer_2mm (scripts/fastsurfer_preprocess.py).
 --scheduler plateau and --seed <n> add _plateau / _seed<n> to the run folder.
 """
 
@@ -62,6 +63,18 @@ INPUTS = {
     "conform": (
         DATA_DIR / "caps_conform_2mm",
         BidsFileType(data_type="conform", suffix="T1w", with_entities={"desc": "conform", "res": "2x2x2"}),
+        [tio.CropOrPad((112, 128, 112)), tio.ZNormalization()],
+    ),
+    # FastSurfer --seg_only (scripts/fastsurfer_preprocess.py): conform + N4 (nu), and + brain mask (brain);
+    # native space as conform, so same centre crop (no re-centring on the brain), then z-normalized
+    "fastsurfer_nu": (
+        DATA_DIR / "caps_fastsurfer_2mm",
+        BidsFileType(data_type="fastsurfer", suffix="T1w", with_entities={"desc": "nu", "res": "2x2x2"}),
+        [tio.CropOrPad((112, 128, 112)), tio.ZNormalization()],
+    ),
+    "fastsurfer_brain": (
+        DATA_DIR / "caps_fastsurfer_2mm",
+        BidsFileType(data_type="fastsurfer", suffix="T1w", with_entities={"desc": "brain", "res": "2x2x2"}),
         [tio.CropOrPad((112, 128, 112)), tio.ZNormalization()],
     ),
 }
