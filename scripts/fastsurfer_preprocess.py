@@ -152,6 +152,8 @@ def main():
             if log.exists():
                 (args.out_dir / "failed").mkdir(exist_ok=True)
                 shutil.copy2(log, args.out_dir / "failed" / f"{sid}.log")
+                print(f"--- end of the FastSurfer log of {sid} ---")
+                print("".join(log.read_text(errors="replace").splitlines(keepends=True)[-15:]), flush=True)
             row = dict(status="failed", mask_ml=None, message=str(e)[:200])
             failed.append(sid)
         seconds = time.time() - start
