@@ -9,7 +9,7 @@ A 3D DenseNet predicts age from T1-weighted MRI of the [IXI](https://brain-devel
 
 ## Key findings
 
-1. **Preprocessing removes most of the shift for two hospitals.** With a minimal standard preprocessing (FreeSurfer conform), the error on an unseen hospital is 2 to 4 times the in-site error. Clinica t1-linear (bias field correction + registration) brings HH from 26.8 to 8.6 years and Guys from 18.7 to 8.9, close to their in-site error.
+1. **Bias field correction removes most of the shift for two hospitals.** With a minimal standard preprocessing (FreeSurfer conform), the error on an unseen hospital is 2 to 4 times the in-site error. Clinica t1-linear (bias field correction + registration) brings HH from 26.8 to 8.6 years and Guys from 18.7 to 8.9, close to their in-site error. FastSurfer's bias field correction alone, without registration, does almost as well (HH 8.7, Guys 10.1).
 2. **Contrast differences need augmentation.** The third hospital (IOP) keeps a different tissue contrast after registration; random contrast augmentation during training improves how well its subjects are ranked by age (correlation 0.52 → 0.66-0.82).
 3. **Domain adaptation fails under label shift.** IOP's subjects are also 7 years younger than the training hospitals'. Unsupervised alignment (AdaBN, DANN) cannot tell this population difference from a scanner difference: it pulls IOP's predictions towards the training population, and the stronger the alignment, the larger the error. On HH, whose population matches the training hospitals, the same methods are neutral or slightly helpful. Re-weighting the source by age (IW-DANN) halves the effect on IOP without removing it.
 
@@ -18,7 +18,7 @@ A 3D DenseNet predicts age from T1-weighted MRI of the [IXI](https://brain-devel
 - **Data**: IXI T1 MRIs with age, 563 subjects: Guys (314), HH (181), IOP (68). Mean ages 50.8 / 47.4 / 42.4 years.
 - **Protocol**: one hospital held out; the two others are split by subject into train / validation / internal test. **In-site** = internal test set (unseen subjects, same hospitals), **out-of-site** = the held-out hospital. Metric: mean absolute error (MAE, years). Always predicting the mean age gives 14-16 years.
 - **Model**: MONAI DenseNet121 (3D), age normalized inside the model, MSE loss, Adam (lr 1e-4), batch size 8, 2 mm images, Google Colab T4 GPU.
-- **Stages**: baseline = FreeSurfer conform (1 mm, 256³, intensities 0-255; no registration, no bias field correction, no skull stripping); v2 = Clinica t1-linear; v3a = + contrast augmentation (random gamma and bias field); v3b = unsupervised domain adaptation (AdaBN, DANN, IW-DANN).
+- **Stages**: baseline = FreeSurfer conform (1 mm, 256³, intensities 0-255; no registration, no bias field correction, no skull stripping); v2 = Clinica t1-linear; v2b = FastSurfer (conform + N4 bias field correction, no registration); v3a = + contrast augmentation (random gamma and bias field); v3b = unsupervised domain adaptation (AdaBN, DANN, IW-DANN).
 - t1-linear was run with Clinica 0.12's ANTsPy backend, which, because of a bug, applies a nonlinear registration instead of an affine one ([journal](docs/journal.md)).
 
 ## Results
@@ -27,13 +27,14 @@ A 3D DenseNet predicts age from T1-weighted MRI of the [IXI](https://brain-devel
 
 Out-of-site MAE in years (in-site MAE in parentheses; single runs, seed 42, unless stated):
 
-| Held-out hospital | Baseline: FreeSurfer conform | v2: t1-linear | v3a: + contrast augmentation | v3a + AdaBN |
-|---|---|---|---|---|
-| IOP | 12.8 (6.4) | 11.2 (6.8) | 8.8 (5.7); **10.9 ± 1.7 over 3 seeds** | 10.2 |
-| HH | 26.8 (7.4) | 8.6 (7.1) | 9.3 (7.9) | **7.6** |
-| Guys | 18.7 (7.7) | 8.9 (7.0) | 10.9 (7.0) | **8.4** |
+| Held-out hospital | Baseline: FreeSurfer conform | v2: t1-linear | v2b: FastSurfer conform + N4 | v3a: + contrast augmentation | v3a + AdaBN |
+|---|---|---|---|---|---|
+| IOP | 12.8 (6.4) | 11.2 (6.8) | 9.9 (7.1) | 8.8 (5.7); **10.9 ± 1.7 over 3 seeds** | 10.2 |
+| HH | 26.8 (7.4) | 8.6 (7.1) | 8.7 (6.5) | 9.3 (7.9) | **7.6** |
+| Guys | 18.7 (7.7) | 8.9 (7.0) | 10.1 (8.3) | 10.9 (7.0) | **8.4** |
 
 - **Baseline**: the out-of-site error is almost a constant offset per hospital (HH ~27 years too young, Guys ~19 too old), while subjects stay correctly ranked (r 0.72-0.83): the model has partly learned each scanner's image style. A first home-made preprocessing gave the same pattern (10.8 / 25.2 / 17.1).
+- **v2b (FastSurfer)**: N4 alone, without registration, removes almost all of the HH and Guys shift: the shift was mainly a bias field effect, not a geometric one. Adding FastSurfer's skull stripping brings it back on Guys (17.1) and IOP (11.8).
 - **Run-to-run variability**: on IOP, 3 seeds of the v3a configuration give 10.9 ± 1.7 years out-of-site (in-site 6.5 ± 0.8). Differences below ~2 years between single runs are not meaningful; the single v3a IOP run (8.8) was a favorable draw.
 - **Checkpoint**: runs with the learning-rate scheduler are evaluated on the final model; runs without it (baseline, v2, v3a) on the best validation epoch, as their final epoch is unstable.
 - **AdaBN** (BatchNorm statistics re-estimated on the unseen hospital's images, no labels, no retraining) removes the remaining offset for HH and Guys but makes IOP worse. The sign and size of its bias follow the age gap between the unseen hospital and the training hospitals at all three sites.
@@ -60,7 +61,7 @@ Full numbers, per-age-group errors, training curves and the reasoning behind eac
 
 - One public dataset (563 subjects, 3 hospitals); one train / validation split; most configurations run with a single seed, while the seed-to-seed spread is about ±1.7 years out-of-site.
 - Brain age error is ~6 years in-site, far from the 2.5-4 years of models trained on tens of thousands of subjects: the study is about the gaps between hospitals, not absolute performance.
-- No skull stripping; 2 mm images; AdaBN and DANN use the unseen hospital's images (without ages) in a transductive setting.
+- No skull stripping (tested only with FastSurfer, where it hurts); 2 mm images; AdaBN and DANN use the unseen hospital's images (without ages) in a transductive setting.
 
 ## Repository structure
 
@@ -70,6 +71,7 @@ scripts/conform_preprocess.py         baseline: FreeSurfer conform, then 2 mm
 scripts/cache_preprocessed.py         first home-made preprocessing (superseded)
 scripts/t1_linear_wsl.sh              Clinica t1-linear on all subjects (Linux / WSL, resumable batches)
 scripts/t1linear_to_2mm.py            2 mm copy of the t1-linear images
+scripts/fastsurfer_preprocess.py      v2b: FastSurfer --seg_only (conform + N4, brain mask), then 2 mm
 scripts/train_ixi_site_shift.py       training and in-site / out-of-site evaluation (ClinicaDL 2.0)
 scripts/predict_ages.py               signed predictions (predicted - true age), per-age-group errors, plots
 scripts/adabn.py                      AdaBN on a trained model
@@ -77,6 +79,8 @@ scripts/train_dann.py                 DANN / IW-DANN fine-tuning
 scripts/make_figures.py               README figures
 notebooks/ixi_brain_age_colab.ipynb   all experiments on Google Colab, step by step
 notebooks/site_dann_pipeline.ipynb    one click: source model + AdaBN + DANN for one held-out hospital
+notebooks/fastsurfer_kaggle.ipynb     v2b: FastSurfer preprocessing on Kaggle
+notebooks/train_fastsurfer_kaggle.ipynb  v2b: training on Kaggle
 docs/journal.md                       experiment journal: configurations, raw results, interpretation
 ```
 
@@ -92,6 +96,7 @@ The IXI data is **not included** in this repository. Download it from the offici
 3. Preprocessing:
    - baseline: `python scripts/conform_preprocess.py` (output `data/IXI/caps_conform_2mm/`)
    - v2: `bash scripts/t1_linear_wsl.sh` (Linux / WSL, Clinica 0.12 installed in `~/clinica_env`; ~8 h on CPU; output `data/IXI/caps_t1linear_2mm/`)
+   - v2b: `python scripts/fastsurfer_preprocess.py --fastsurfer-home <FastSurfer dir>` (FastSurfer 2.6.1, GPU; ~3 min per subject on a T4; output `data/IXI/caps_fastsurfer_2mm/`)
 4. Train and evaluate, e.g. t1-linear images, contrast augmentation, learning-rate scheduler, IOP held out:
    ```bash
    python scripts/train_ixi_site_shift.py --data t1linear --augment --scheduler plateau --test-site IOP --seed 42
@@ -99,7 +104,7 @@ The IXI data is **not included** in this repository. Download it from the offici
    python scripts/adabn.py                --data t1linear --augment --scheduler plateau --test-site IOP --seed 42 --checkpoint final
    python scripts/train_dann.py           --data t1linear --augment --scheduler plateau --test-site IOP --seed 42 --lambda-max 0.3 --iw
    ```
-   `--data conform` for the baseline. Results go to `outputs/site_shift_test-<site>[_conform|_t1linear][_aug][_plateau][_seed<n>][_dann...]/`.
+   `--data conform` for the baseline, `--data fastsurfer_nu` for v2b (`fastsurfer_brain`: with skull stripping). Results go to `outputs/site_shift_test-<site>[_conform|_t1linear|_fastsurfer_nu|_fastsurfer_brain][_aug][_plateau][_seed<n>][_dann...]/`.
 
 On Google Colab, `notebooks/site_dann_pipeline.ipynb` runs step 4 (source model, AdaBN, DANN) for one hospital in about 2.5 hours on a T4.
 
@@ -107,7 +112,7 @@ On Google Colab, `notebooks/site_dann_pipeline.ipynb` runs step 4 (source model,
 
 - More seeds for every configuration, and the v2 configuration without augmentation, to measure the effect of augmentation precisely.
 - A better estimate of the unseen hospital's age distribution for IW-DANN (correcting the compressed predictions, or black-box shift estimation).
-- FreeSurfer `autorecon1` (bias correction, intensity normalization, skull stripping, no registration) to separate bias correction from registration; a second dataset.
+- More seeds for v2b, and contrast augmentation on the v2b images; a second dataset.
 
 ## Acknowledgements
 
