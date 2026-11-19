@@ -23,9 +23,6 @@ scripts/brain_age_test.py
 scripts/main_train.py
 scripts/make_synthetic_bids.py
 
-# Outils
-.claude/
-
 # IDE
 .vscode/
 .idea/
